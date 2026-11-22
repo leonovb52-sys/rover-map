@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Rover — карта</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"
+      integrity="sha384-c6Rcwz4e4CITMbu/NBmnNS8yN2sC3cUElMEMfP3vqqKFp7GOYaaBBCqmaWBjmkjb" crossorigin="anonymous">
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"
+        integrity="sha384-NElt3Op+9NBMCYaef5HxeJmU4Xeard/Lku8ek6hoPTvYkQPh3zLIrJP7KiRocsxO" crossorigin="anonymous"></script>
+<style>
+  :root {
+    --bg: var(--tg-theme-bg-color, #ffffff);
+    --text: var(--tg-theme-text-color, #111111);
+    --hint: var(--tg-theme-hint-color, #8a8a8a);
+    --accent: #f5a623;
+    --accent-text: #111111;
+    --panel-shadow: 0 -4px 18px rgba(0, 0, 0, .18);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 15px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  #map { position: fixed; inset: 0; }
+  #pin { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -100%);
+    z-index: 500; pointer-events: none; font-size: 40px; line-height: 1; filter: drop-shadow(0 3px 3px rgba(0,0,0,.35)); }
+  #title { position: fixed; top: 12px; left: 12px; right: 12px; z-index: 600; background: var(--bg);
+    border-radius: 14px; padding: 10px 14px; font-weight: 600; box-shadow: 0 2px 10px rgba(0,0,0,.15); }
+  #title small { display: block; font-weight: 400; color: var(--hint); }
+  #locate { position: fixed; right: 14px; bottom: 210px; z-index: 600; width: 48px; height: 48px;
+    border-radius: 50%; border: 0; background: var(--bg); color: var(--text); font-size: 22px;
+    box-shadow: 0 2px 10px rgba(0,0,0,.25); }
+  #panel { position: fixed; left: 0; right: 0; bottom: 0; z-index: 600; background: var(--bg);
+    border-radius: 18px 18px 0 0; padding: 14px 16px 18px; box-shadow: var(--panel-shadow); }
+  .row { display: flex; gap: 10px; align-items: flex-start; margin: 4px 0; }
+  .dot { width: 22px; text-align: center; }
+  .addr { flex: 1; min-height: 20px; }
+  .addr.muted { color: var(--hint); }
+  input, select { width: 100%; padding: 10px 12px; margin-top: 8px; border-radius: 10px;
+    border: 1px solid rgba(128,128,128,.35); background: transparent; color: var(--text); font-size: 15px; }
+  #price { margin-top: 10px; font-size: 17px; font-weight: 700; }
+  #price small { font-weight: 400; color: var(--hint); }
+  #fallback { display: none; width: 100%; margin-top: 12px; padding: 13px; border: 0; border-radius: 12px;
+    background: var(--accent); color: var(--accent-text); font-size: 16px; font-weight: 700; }
+  .hidden { display: none !important; }
+  .leaflet-control-attribution { font-size: 9px; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div id="pin">📍</div>
+<div id="title"><span id="titleText">Звідки вас забрати?</span><small id="titleHint">Рухайте карту — мітка в центрі</small></div>
+<button id="locate" title="Я тут">◎</button>
+<div id="panel">
+  <div class="row" id="rowFrom"><span class="dot">🟢</span><span class="addr muted" id="addrFrom">Визначаємо адресу…</span></div>
+  <div class="row hidden" id="rowTo"><span class="dot">🏁</span><span class="addr muted" id="addrTo">Куди?</span></div>
+  <div id="adminBox" class="hidden">
+    <select id="districtSelect"></select>
+    <div class="row"><span class="addr muted" id="adminStatus"></span></div>
+  </div>
+  <input id="noteFrom" class="hidden" placeholder="Під'їзд, орієнтир (необов'язково)" maxlength="120">
+  <div id="price" class="hidden"></div>
+  <button id="fallback"></button>
+</div>
+
+<script>
+(function () {
+  const tg = window.Telegram && window.Telegram.WebApp;
+  const params = new URLSearchParams(location.search);
+  let cfg = {};
+  try {
+    const raw = params.get("c") || "";
+    cfg = JSON.parse(decodeURIComponent(escape(atob(raw.replace(/-/g, "+").replace(/_/g, "/")))));
+  } catch (e) { cfg = {}; }
+
+  const MODE = cfg.m === "admin" ? "admin" : "order";
+  const CITY = cfg.h || [48.3175, 31.5300];
+  const centers = {};                       // назва → [lat, lon, зона]
+  (cfg.c || []).forEach(([name, zone, lat, lon]) => { centers[name] = [lat, lon, zone]; });
+
+  const $ = (id) => document.getElementById(id);
+  const esc = (x) => String(x).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const map = L.map("map", { zoomControl: false, attributionControl: true }).setView(CITY, 15);
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19, attribution: "© OpenStreetMap"
+  }).addTo(map);
+
+  // ---------- спільне ----------
+  function round(x) { return Math.floor(x + 0.5); }
+  function km(a, b) {
+    const R = 6371, rad = Math.PI / 180;
+    const dLat = (b[0] - a[0]) * rad, dLon = (b[1] - a[1]) * rad;
+    const h = Math.sin(dLat / 2) ** 2 + Math.cos(a[0] * rad) * Math.cos(b[0] * rad) * Math.sin(dLon / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(h));
+  }
+  function center() { const c = map.getCenter(); return [+c.lat.toFixed(6), +c.lng.toFixed(6)]; }
+  function setButton(text, onClick) {
+    if (tg && tg.MainButton) {
+      tg.MainButton.offClick(tg.MainButton._handler || (() => {}));
+      tg.MainButton._handler = onClick;
+      tg.MainButton.setText(text);
+      tg.MainButton.onClick(onClick);
+      tg.MainButton.show();
+    }
+    const fb = $("fallback");
+    if (!tg || !tg.initData) { fb.style.display = "block"; fb.textContent = text; fb.onclick = onClick; }
+  }
+  function send(payload) {
+    const data = JSON.stringify(payload);
+    if (tg && tg.initData) tg.sendData(data);
+    else alert("Відкрийте карту з бота в Telegram.\n\n" + data);
+  }
+
+  $("locate").onclick = function () {
+    if (!navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(
+      (p) => map.setView([p.coords.latitude, p.coords.longitude], 17),
+      () => { if (tg) tg.showAlert("Не вдалося визначити місце. Дозвольте доступ до геолокації або посуньте карту вручну."); },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  };
+
+  // адреса під міткою (OpenStreetMap Nominatim, не частіше ніж раз на ~0.8 с)
+  let geoTimer = null, geoSeq = 0;
+  function reverse(point, el) {
+    clearTimeout(geoTimer);
+    el.textContent = "Визначаємо адресу…"; el.classList.add("muted");
+    const seq = ++geoSeq;
+    geoTimer = setTimeout(async () => {
+      try {
+        const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=18&accept-language=uk&lat=${point[0]}&lon=${point[1]}`);
+        const j = await r.json();
+        if (seq !== geoSeq) return;
+        const a = j.address || {};
+        const street = [a.road || a.pedestrian || a.neighbourhood || a.suburb, a.house_number].filter(Boolean).join(", ");
+        const town = a.village || a.town || a.city || a.hamlet || "";
+        el.textContent = street ? (town && km(point, CITY) > (cfg.r || 4) ? `${street}, ${town}` : street) : (town || "Точка на карті");
+        el.classList.remove("muted");
+      } catch (e) { if (seq === geoSeq) { el.textContent = "Точка на карті"; el.classList.remove("muted"); } }
+    }, 800);
+  }
+
+  // ---------- ціна (та сама логіка, що й у боті) ----------
+  function locate(point) {
+    const names = Object.keys(centers);
+    if (!names.length) return null;
+    if (km(point, CITY) > (cfg.r || 4)) return "OUT";
+    let best = null, bestD = Infinity;
+    names.forEach((n) => { const d = km(point, centers[n]); if (d < bestD) { bestD = d; best = n; } });
+    return best;
+  }
+  function estimate(from, to) {
+    const fz = locate(from), tz = locate(to);
+    const night = cfg.n || 1;
+    if (fz === null || tz === null) return null;
+    if (fz === "OUT" || tz === "OUT") {
+      const dist = Math.ceil(km(from, to) * (cfg.f || 1.3));
+      const o = cfg.o || [200, 15];
+      return { price: round(round(o[0] + dist * o[1]) * night), label: `за місто, ≈ ${dist} км` };
+    }
+    const a = Math.min(centers[fz][2], centers[tz][2]), b = Math.max(centers[fz][2], centers[tz][2]);
+    const base = (cfg.p || {})[`${a}-${b}`];
+    if (base == null) return null;
+    return { price: round(base * night), label: `${fz} → ${tz}` };
+  }
+
+  // ---------- замовлення ----------
+  const state = { step: 0, from: null, to: null, fromAddr: "", toAddr: "" };
+  let markerFrom = null, markerTo = null, line = null;
+
+  function showStep() {
+    const s = state.step;
+    $("pin").classList.toggle("hidden", s === 2);
+    $("locate").classList.toggle("hidden", s === 2);
+    $("rowTo").classList.toggle("hidden", s === 0);
+    $("noteFrom").classList.toggle("hidden", s !== 2);
+    $("price").classList.toggle("hidden", s !== 2);
+    if (tg && tg.BackButton) s > 0 ? tg.BackButton.show() : tg.BackButton.hide();
+
+    if (s === 0) {
+      $("titleText").textContent = "Звідки вас забрати?";
+      $("titleHint").textContent = "Рухайте карту — мітка в центрі";
+      $("pin").textContent = "📍";
+      setButton("Підтвердити: звідки", confirmFrom);
+      reverse(center(), $("addrFrom"));
+    } else if (s === 1) {
+      $("titleText").textContent = "Куди їдемо?";
+      $("titleHint").textContent = "Поставте мітку на місце призначення";
+      $("pin").textContent = "🏁";
+      setButton("Підтвердити: куди", confirmTo);
+      reverse(center(), $("addrTo"));
+    } else {
+      $("titleText").textContent = "Перевірте поїздку";
+      $("titleHint").textContent = "Можна уточнити під'їзд чи орієнтир";
+      const est = estimate(state.from, state.to);
+      const dist = km(state.from, state.to).toFixed(1);
+      $("price").innerHTML = est
+        ? `≈ ${est.price} грн <small>· ${esc(est.label)}${cfg.n > 1 ? " · нічний тариф" : ""}</small>`
+        : `<small>${dist} км по прямій · точну ціну покаже бот</small>`;
+      setButton(est ? `Далі · ${est.price} грн` : "Далі", finish);
+    }
+  }
+
+  function confirmFrom() {
+    state.from = center(); state.fromAddr = $("addrFrom").textContent;
+    if (markerFrom) markerFrom.remove();
+    markerFrom = L.marker(state.from, { icon: L.divIcon({ html: "🟢", className: "", iconSize: [24, 24] }) }).addTo(map);
+    state.step = 1; showStep();
+  }
+  function confirmTo() {
+    state.to = center(); state.toAddr = $("addrTo").textContent;
+    if (markerTo) markerTo.remove();
+    if (line) line.remove();
+    markerTo = L.marker(state.to, { icon: L.divIcon({ html: "🏁", className: "", iconSize: [24, 24] }) }).addTo(map);
+    line = L.polyline([state.from, state.to], { color: "#f5a623", weight: 4, dashArray: "6 8" }).addTo(map);
+    map.fitBounds(line.getBounds(), { paddingTopLeft: [30, 90], paddingBottomRight: [30, 260] });
+    state.step = 2; showStep();
+  }
+  function finish() {
+    const note = $("noteFrom").value.trim();
+    send({
+      t: "order",
+      from: state.from, to: state.to,
+      fa: (state.fromAddr + (note ? ` (${note})` : "")).slice(0, 200),
+      ta: state.toAddr.slice(0, 200),
+    });
+  }
+  function back() {
+    if (state.step === 2) { if (markerTo) markerTo.remove(); if (line) line.remove(); map.setView(state.to, 16); state.step = 1; }
+    else if (state.step === 1) { if (markerFrom) markerFrom.remove(); map.setView(state.from, 16); state.step = 0; }
+    showStep();
+  }
+
+  map.on("moveend", () => {
+    if (MODE !== "order") return;
+    if (state.step === 0) reverse(center(), $("addrFrom"));
+    if (state.step === 1) reverse(center(), $("addrTo"));
+  });
+
+  // ---------- адмін: точки районів ----------
+  function adminInit() {
+    $("rowFrom").classList.add("hidden");
+    $("adminBox").classList.remove("hidden");
+    $("titleText").textContent = "Райони на карті";
+    $("titleHint").textContent = "Оберіть район, наведіть мітку на його центр і натисніть «Поставити»";
+    const sel = $("districtSelect");
+    const all = cfg.d || Object.keys(centers);
+    const markers = {};
+    function draw(name) {
+      if (markers[name]) markers[name].remove();
+      if (!centers[name]) return;
+      markers[name] = L.marker(centers[name].slice(0, 2), {
+        icon: L.divIcon({ html: `<b style="background:#f5a623;color:#111;padding:2px 6px;border-radius:8px;white-space:nowrap">${esc(name)}</b>`, className: "", iconSize: null })
+      }).addTo(map);
+    }
+    function refresh() {
+      const done = all.filter((n) => centers[n]).length;
+      sel.innerHTML = all.map((n) => `<option value="${esc(n)}">${centers[n] ? "✅" : "⬜"} ${esc(n)}</option>`).join("");
+      $("adminStatus").textContent = `Розмічено ${done} з ${all.length}`;
+      setButton(`Поставити точку: ${sel.value}`, place);
+    }
+    function showSave() {
+      // «Зберегти» доступне, щойно є хоч одна точка (кнопка є в Telegram 7.10+)
+      if (tg && tg.SecondaryButton && Object.keys(centers).length) {
+        tg.SecondaryButton.setText("💾 Зберегти");
+        tg.SecondaryButton.show();
+      }
+    }
+    function place() {
+      const name = sel.value;
+      centers[name] = center().concat([centers[name] ? centers[name][2] : 0]);
+      draw(name);
+      showSave();
+      const next = all.find((n) => !centers[n]);
+      refresh();
+      if (next) sel.value = next;
+      setButton(next ? `Поставити точку: ${sel.value}` : "💾 Зберегти райони", next ? place : save);
+      if (!next && tg) tg.showAlert("Усі райони розмічено. Натисніть «Зберегти райони».");
+    }
+    function save() {
+      const out = {};
+      all.forEach((n) => { if (centers[n]) out[n] = centers[n].slice(0, 2); });
+      send({ t: "centers", c: out });
+    }
+    sel.onchange = () => {
+      if (centers[sel.value]) map.setView(centers[sel.value].slice(0, 2), 16);
+      setButton(`Поставити точку: ${sel.value}`, place);
+    };
+    all.forEach(draw);
+    refresh();
+    const first = all.find((n) => !centers[n]);
+    if (first) sel.value = first;
+    setButton(`Поставити точку: ${sel.value}`, place);
+    if (tg && tg.SecondaryButton) tg.SecondaryButton.onClick(save);
+    showSave();
+  }
+
+  if (tg) {
+    tg.ready(); tg.expand();
+    if (tg.BackButton) tg.BackButton.onClick(back);
+    if (tg.MainButton) tg.MainButton.setParams({ color: "#f5a623", text_color: "#111111" });
+  }
+  if (MODE === "admin") adminInit(); else showStep();
+})();
+</script>
+</body>
+</html>
