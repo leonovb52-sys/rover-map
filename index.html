@@ -66,6 +66,8 @@
 <script>
 (function () {
   const tg = window.Telegram && window.Telegram.WebApp;
+  // Відкрито з кнопки меню бота: initData там ПОРОЖНІЙ (так задумав Telegram), тому перевіряємо платформу.
+  const IN_TG = !!(tg && tg.platform && tg.platform !== "unknown");
   const params = new URLSearchParams(location.search);
   let cfg = {};
   try {
@@ -103,11 +105,11 @@
       tg.MainButton.show();
     }
     const fb = $("fallback");
-    if (!tg || !tg.initData) { fb.style.display = "block"; fb.textContent = text; fb.onclick = onClick; }
+    if (!IN_TG) { fb.style.display = "block"; fb.textContent = text; fb.onclick = onClick; }
   }
   function send(payload) {
     const data = JSON.stringify(payload);
-    if (tg && tg.initData) tg.sendData(data);
+    if (IN_TG) tg.sendData(data);   // Telegram закриває карту й передає дані боту
     else alert("Відкрийте карту з бота в Telegram.\n\n" + data);
   }
 
@@ -133,7 +135,11 @@
     const seq = ++geoSeq;
     geoTimer = setTimeout(async () => {
       try {
-        const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=18&accept-language=uk&lat=${point[0]}&lon=${point[1]}`);
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 4000);
+        const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=18&accept-language=uk&lat=${point[0]}&lon=${point[1]}`,
+                              { signal: ctrl.signal });
+        clearTimeout(timer);
         const j = await r.json();
         if (seq !== geoSeq) return;
         const a = j.address || {};
@@ -143,6 +149,10 @@
         el.classList.remove("muted");
       } catch (e) { if (seq === geoSeq) { el.textContent = "Точка на карті"; el.classList.remove("muted"); } }
     }, 800);
+  }
+
+  function addrText(el) {
+    return el.classList.contains("muted") ? "" : el.textContent;  // ще визначається — бот напише «за міткою»
   }
 
   // ---------- ціна (та сама логіка, що й у боті) ----------
@@ -208,13 +218,13 @@
   }
 
   function confirmFrom() {
-    state.from = center(); state.fromAddr = $("addrFrom").textContent;
+    state.from = center(); state.fromAddr = addrText($("addrFrom"));
     if (markerFrom) markerFrom.remove();
     markerFrom = L.marker(state.from, { icon: L.divIcon({ html: "🟢", className: "", iconSize: [24, 24] }) }).addTo(map);
     state.step = 1; showStep();
   }
   function confirmTo() {
-    state.to = center(); state.toAddr = $("addrTo").textContent;
+    state.to = center(); state.toAddr = addrText($("addrTo"));
     if (markerTo) markerTo.remove();
     if (line) line.remove();
     markerTo = L.marker(state.to, { icon: L.divIcon({ html: "🏁", className: "", iconSize: [24, 24] }) }).addTo(map);
@@ -227,7 +237,7 @@
     send({
       t: "order",
       from: state.from, to: state.to,
-      fa: (state.fromAddr + (note ? ` (${note})` : "")).slice(0, 200),
+      fa: [state.fromAddr, note].filter(Boolean).join(", ").slice(0, 200),
       ta: state.toAddr.slice(0, 200),
     });
   }
@@ -267,7 +277,7 @@
     }
     function showSave() {
       // «Зберегти» доступне, щойно є хоч одна точка (кнопка є в Telegram 7.10+)
-      if (tg && tg.SecondaryButton && Object.keys(centers).length) {
+      if (IN_TG && tg.SecondaryButton && Object.keys(centers).length) {
         tg.SecondaryButton.setText("💾 Зберегти");
         tg.SecondaryButton.show();
       }
@@ -281,7 +291,7 @@
       refresh();
       if (next) sel.value = next;
       setButton(next ? `Поставити точку: ${sel.value}` : "💾 Зберегти райони", next ? place : save);
-      if (!next && tg) tg.showAlert("Усі райони розмічено. Натисніть «Зберегти райони».");
+      if (!next && IN_TG) tg.showAlert("Усі райони розмічено. Натисніть «Зберегти райони».");
     }
     function save() {
       const out = {};
@@ -297,7 +307,7 @@
     const first = all.find((n) => !centers[n]);
     if (first) sel.value = first;
     setButton(`Поставити точку: ${sel.value}`, place);
-    if (tg && tg.SecondaryButton) tg.SecondaryButton.onClick(save);
+    if (IN_TG && tg.SecondaryButton) tg.SecondaryButton.onClick(save);
     showSave();
   }
 
