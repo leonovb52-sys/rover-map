@@ -171,16 +171,34 @@
   if (IN_TG && tg.BackButton) tg.BackButton.onClick(() => backHandler && backHandler());
 
   // ---------- місця: Нова Пошта (наживо з її API) + список із таблиці ----------
-  const places = (cfg.pl || []).map(([name, lat, lon, icon]) => ({ name, sub: "", lat, lon, icon: icon || "📌" }));
+  const CATEGORY = { "🛒": "магазин супермаркет продукти маркет", "👕": "одяг магазин", "👟": "взуття магазин",
+    "🧁": "кондитерська торти солодощі", "🥖": "хліб пекарня", "🥩": "м'ясо ковбаси магазин", "🧴": "косметика побутова хімія магазин",
+    "☕": "кафе кав'ярня кава", "🍽": "ресторан кафе їжа", "🍔": "фастфуд їжа", "🍕": "піца піцерія суші", "🍣": "суші",
+    "🍺": "бар паб пиво", "💊": "аптека ліки", "🏥": "лікарня поліклініка", "🦷": "стоматологія", "🏦": "банк банкомат",
+    "⛽": "азс заправка пальне", "🚌": "автостанція автовокзал автобус", "🚉": "вокзал залізниця потяг",
+    "🏫": "школа", "🧸": "садочок дитсадок", "🎓": "училище коледж", "🚓": "поліція", "🏛": "адміністрація музей", "🏬": "епіцентр будівельний магазин",
+    "⛪": "церква храм", "🎭": "палац культури клуб", "🏨": "готель", "🐾": "ветеринар", "📦": "нова пошта посилки" };
+  const places = (cfg.pl || []).map(([name, lat, lon, icon]) => ({ name, sub: "", lat, lon, icon: icon || "📌", own: true }));
   const npPlaces = [];
-  const poiLayer = L.layerGroup().addTo(map);
-  function drawPoi(p) {
+  const poiLayer = L.layerGroup().addTo(map);      // свої місця й Нова Пошта — видно завжди
+  const cityLayer = L.layerGroup();                // решта місць міста — лише при наближенні
+  function drawPoi(p, layer) {
     L.marker([p.lat, p.lon], { icon: L.divIcon({ html: `<div class="poi">${p.icon}</div>`, className: "", iconSize: [26, 26] }) })
       .on("click", () => choose(activeSide || (state.to ? "from" : "to"), p))
       .bindTooltip(esc(p.name), { direction: "top", offset: [0, -12] })
-      .addTo(poiLayer);
+      .addTo(layer || poiLayer);
   }
-  places.forEach(drawPoi);
+  places.forEach((p) => drawPoi(p));
+  const toggleCity = () => (map.getZoom() >= 15 ? cityLayer.addTo(map) : cityLayer.remove());
+  map.on("zoomend", toggleCity);
+  // база місць міста (магазини, кафе, аптеки…) лежить поруч зі сторінкою
+  fetch("places.json").then((r) => r.json()).then((list) => {
+    list.forEach((p) => {
+      if (places.some((q) => q.name === p.name && km([q.lat, q.lon], [p.lat, p.lon]) < 0.05)) return;
+      places.push(p); drawPoi(p, cityLayer);
+    });
+    toggleCity(); chips();
+  }).catch(() => {});
   fetch("https://api.novaposhta.ua/v2.0/json/", {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ apiKey: "", modelName: "AddressGeneral", calledMethod: "getWarehouses",
@@ -364,14 +382,15 @@
     if (!nq) {
       const rec = recent();
       if (rec.length) { box.appendChild(group("Недавні")); rec.forEach((p) => box.appendChild(item("🕘", p.name, p.sub, () => choose(side, p)))); }
-      if (all.length) { box.appendChild(group("Місця")); all.forEach((p) => box.appendChild(item(p.icon, p.name, p.sub, () => choose(side, p)))); }
+      const mine = all.filter((p) => p.own || p.np);
+      if (mine.length) { box.appendChild(group("Місця")); mine.forEach((p) => box.appendChild(item(p.icon, p.name, p.sub, () => choose(side, p)))); }
       return;
     }
     const words = nq.split(" ");
-    const hits = all.filter((p) => { const h = norm(p.name + " " + (p.sub || "")); return words.every((w) => h.includes(w)); });
+    const hits = all.filter((p) => { const h = norm(`${p.name} ${p.sub || ""} ${CATEGORY[p.icon] || ""}`); return words.every((w) => h.includes(w)); });
     const num = (nq.match(/\d+/) || [])[0];
     if (num) hits.sort((a, b) => (new RegExp(`№\\s*${num}\\b`).test(b.name) ? 1 : 0) - (new RegExp(`№\\s*${num}\\b`).test(a.name) ? 1 : 0));
-    if (hits.length) { box.appendChild(group("Місця")); hits.slice(0, 12).forEach((p) => box.appendChild(item(p.icon, p.name, p.sub, () => choose(side, p)))); }
+    if (hits.length) { box.appendChild(group("Місця")); hits.slice(0, 25).forEach((p) => box.appendChild(item(p.icon, p.name, p.sub, () => choose(side, p)))); }
     const addrGroup = group("Адреси"); addrGroup.id = "addrGroup"; box.appendChild(addrGroup);
     const wait = item("⏳", "Шукаємо адреси…", "", () => {}); wait.id = "addrWait"; box.appendChild(wait);
     clearTimeout(searchTimer);
@@ -475,8 +494,13 @@
   function chips() {
     const box = $("chips"); box.innerHTML = "";
     const add = (text, fn) => { const c = document.createElement("div"); c.className = "chip"; c.textContent = text; c.onclick = fn; box.appendChild(c); };
-    add("📦 Нова Пошта", () => { openSearch(state.from ? "to" : "from"); $("q").value = "нова пошта"; render("нова пошта"); });
-    places.slice(0, 6).forEach((p) => add(`${p.icon} ${p.name}`, () => choose(state.from ? "to" : "from", p)));
+    const find = (q) => () => { openSearch(state.from ? "to" : "from"); $("q").value = q; render(q); };
+    add("📦 Нова Пошта", find("нова пошта"));
+    places.filter((p) => p.own).slice(0, 4).forEach((p) => add(`${p.icon} ${p.name}`, () => choose(state.from ? "to" : "from", p)));
+    add("🛒 Магазини", find("магазин"));
+    add("☕ Кафе", find("кафе"));
+    add("💊 Аптеки", find("аптека"));
+    add("🚌 Автостанція", find("автостанція"));
     add("📍 На карті", () => startPin(state.from ? "to" : "from"));
   }
 
