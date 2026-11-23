@@ -191,14 +191,18 @@
   places.forEach((p) => drawPoi(p));
   const toggleCity = () => (map.getZoom() >= 15 ? cityLayer.addTo(map) : cityLayer.remove());
   map.on("zoomend", toggleCity);
-  // база місць міста (магазини, кафе, аптеки…) лежить поруч зі сторінкою
-  fetch("places.json").then((r) => r.json()).then((list) => {
+  // місця поруч зі сторінкою: extra_places.json — додані адміном у боті (видно завжди),
+  // places.json — база міста (магазини, кафе, аптеки…), видно при наближенні
+  function addPlaces(list, own) {
     list.forEach((p) => {
       if (places.some((q) => q.name === p.name && km([q.lat, q.lon], [p.lat, p.lon]) < 0.05)) return;
-      places.push(p); drawPoi(p, cityLayer);
+      p.own = own; places.push(p); drawPoi(p, own ? poiLayer : cityLayer);
     });
-    toggleCity(); chips();
-  }).catch(() => {});
+  }
+  const load = (file) => fetch(`${file}?v=${Date.now() / 60000 | 0}`).then((r) => (r.ok ? r.json() : [])).catch(() => []);
+  Promise.all([load("extra_places.json"), load("places.json")]).then(([extra, city]) => {
+    addPlaces(extra, true); addPlaces(city, false); toggleCity(); chips();
+  });
   fetch("https://api.novaposhta.ua/v2.0/json/", {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ apiKey: "", modelName: "AddressGeneral", calledMethod: "getWarehouses",
