@@ -111,14 +111,19 @@
     else alert("Відкрийте карту з бота в Telegram.\n\n" + data);
   }
 
-  $("locate").onclick = function () {
+  function locateMe(silent) {
     if (!navigator.geolocation) return;
     navigator.geolocation.getCurrentPosition(
-      (p) => map.setView([p.coords.latitude, p.coords.longitude], 17),
-      () => { if (tg) tg.showAlert("Не вдалося визначити місце. Дозвольте доступ до геолокації або посуньте карту вручну."); },
+      (p) => {
+        const here = [p.coords.latitude, p.coords.longitude];
+        // далеко від міста (напр. відкрили з іншого міста) — лишаємо карту на Новоукраїнці
+        if (!silent || km(here, CITY) < 40) map.setView(here, 17);
+      },
+      () => { if (!silent && tg) tg.showAlert("Не вдалося визначити місце. Дозвольте доступ до геолокації або посуньте карту вручну."); },
       { enableHighAccuracy: true, timeout: 10000 }
     );
-  };
+  }
+  $("locate").onclick = () => locateMe(false);
 
   // адреса під міткою (OpenStreetMap Nominatim, не частіше ніж раз на ~0.8 с)
   let geoTimer = null, geoSeq = 0;
@@ -194,10 +199,11 @@
       $("titleHint").textContent = "Можна уточнити під'їзд чи орієнтир";
       const est = estimate(state.from, state.to);
       const dist = km(state.from, state.to).toFixed(1);
-      $("price").innerHTML = est
+      $("price").innerHTML = (est
         ? `≈ ${est.price} грн <small>· ${esc(est.label)}${cfg.n > 1 ? " · нічний тариф" : ""}</small>`
-        : `<small>${dist} км по прямій · точну ціну покаже бот</small>`;
-      setButton(est ? `Далі · ${est.price} грн` : "Далі", finish);
+        : `<small>${dist} км по прямій</small>`)
+        + `<br><small>Водії запропонують свої ціни — ви оберете найкращу</small>`;
+      setButton(est ? `Далі · ≈ ${est.price} грн` : "Далі", finish);
     }
   }
 
@@ -300,7 +306,7 @@
     if (tg.BackButton) tg.BackButton.onClick(back);
     if (tg.MainButton) tg.MainButton.setParams({ color: "#f5a623", text_color: "#111111" });
   }
-  if (MODE === "admin") adminInit(); else showStep();
+  if (MODE === "admin") adminInit(); else { showStep(); locateMe(true); }
 })();
 </script>
 </body>
