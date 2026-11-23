@@ -124,11 +124,12 @@
   const $ = (id) => document.getElementById(id);
   const esc = (x) => String(x).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const map = L.map("map", { zoomControl: false }).setView(CITY, 14);
+  let gl = null;   // векторна карта MapLibre під Leaflet — з неї беремо назви закладів під міткою
   // власні стилі Rover (день/ніч) на даних OpenFreeMap; тема — як у Telegram (світла/темна)
   const isDark = () => (IN_TG ? tg.colorScheme === "dark" : window.matchMedia("(prefers-color-scheme: dark)").matches);
   const styleUrl = () => new URL(isDark() ? "rover-night.json" : "rover-day.json", location.href).href;
   try {
-    const gl = L.maplibreGL({ style: styleUrl(),
+    gl = L.maplibreGL({ style: styleUrl(),
                               attribution: '<a href="https://openfreemap.org">OpenFreeMap</a> © OpenStreetMap' }).addTo(map);
     if (IN_TG) tg.onEvent("themeChanged", () => gl.getMaplibreMap().setStyle(styleUrl()));
   } catch (e) {
@@ -538,18 +539,50 @@
     else redraw();
   }
   let pinHasNumber = false;
+
+  // заклад під міткою: спершу наші місця (≈40 м), потім підписи самої карти
+  function placeAt(point) {
+    let best = null, bestD = 0.04;
+    [...places, ...npPlaces].forEach((p) => { const d = km(point, [p.lat, p.lon]); if (d < bestD) { bestD = d; best = p; } });
+    if (best) return { icon: best.icon, name: best.name, sub: best.sub || "" };
+    try {
+      const m = gl && gl.getMaplibreMap();
+      if (!m) return null;
+      const c = m.project([point[1], point[0]]);
+      const f = m.queryRenderedFeatures([[c.x - 22, c.y - 22], [c.x + 22, c.y + 22]])
+        .find((x) => x.layer.id.startsWith("poi") && (x.properties["name:uk"] || x.properties.name));
+      if (f) return { icon: "📌", name: f.properties["name:uk"] || f.properties.name, sub: "" };
+    } catch (e) { /* карта ще не готова */ }
+    return null;
+  }
+
   function reverse(point) {
     clearTimeout(geoTimer);
-    pinName = ""; pinHasNumber = false; $("pinAddr").textContent = "Визначаємо адресу…";
+    pinName = ""; pinHasNumber = false;
+    const place = placeAt(point);
+    // назву закладу показуємо одразу, адресу дописуємо, коли знайдеться
+    $("pinAddr").textContent = place ? `${place.icon} ${place.name}` : "Визначаємо адресу…";
+    if (place) { pinName = place.sub ? `${place.name} (${place.sub})` : place.name; pinHasNumber = true; }
     const seq = ++geoSeq;
     geoTimer = setTimeout(async () => {
+      if (place && place.sub) return;
       const r = await reverseAddr(point[0], point[1]);
       if (seq !== geoSeq) return;
+      if (place) {
+        pinName = r.name ? `${place.name} (${r.name})` : place.name;
+        $("pinAddr").textContent = `${place.icon} ${pinName}`;
+        return;
+      }
       pinName = r.name; pinHasNumber = r.number;
       $("pinAddr").textContent = pinName ? pinName + (pinHasNumber ? "" : " · номер уточните далі") : "Точка на карті";
-    }, 500);
+    }, 400);
   }
   map.on("moveend", () => { if (pinSide) reverse(center()); });
+  map.on("move", () => {
+    if (!pinSide) return;
+    const place = placeAt(center());
+    if (place) $("pinAddr").textContent = `${place.icon} ${place.name}`;
+  });
 
   // ---------- моє місцезнаходження ----------
   function locateMe(explicit) {
