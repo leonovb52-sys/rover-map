@@ -370,6 +370,80 @@
   }
   function group(title) { const g = document.createElement("div"); g.className = "group"; g.textContent = title; return g; }
 
+  // ---------- вулиці міста (миттєвий пошук без інтернету) ----------
+  let streets = [];
+  fetch(`streets.json?v=${Date.now() / 3600000 | 0}`).then((r) => r.json()).then((list) => { streets = list; }).catch(() => {});
+  const TYPE_WORDS = /^(вулиця|вул|провулок|пров|проспект|просп|площа|пл|майдан|бульвар|бул|узвіз|тупик|шосе|проїзд|в'їзд)$/;
+  const streetWords = (name) => norm(name).split(" ").filter((w) => w && !TYPE_WORDS.test(w));
+
+  function splitQuery(q) {
+    // «Соборна 54», «соборна, 54а», «вул. Соборна 54/1» → вулиця + номер
+    const m = q.trim().match(/^(.*?)[\s,]+(\d+[\p{L}]?(?:\/\d+)?)$/u);
+    return m ? { street: m[1], number: m[2] } : { street: q.trim(), number: "" };
+  }
+  function matchStreets(text) {
+    const words = streetWords(text);
+    if (!words.length) return [];
+    return streets.filter((s) => { const sw = streetWords(s.n); return words.every((w) => sw.some((x) => x.startsWith(w))); })
+      .sort((a, b) => (streetWords(a.n)[0].startsWith(words[0]) ? 0 : 1) - (streetWords(b.n)[0].startsWith(words[0]) ? 0 : 1)
+                      || a.n.localeCompare(b.n, "uk"));
+  }
+  function streetMiddle(s) {
+    const line = s.p.reduce((a, b) => (b.length > a.length ? b : a), []);
+    if (line.length) return line[Math.floor(line.length / 2)];
+    const h = Object.values(s.h); return h[0];
+  }
+  const numVal = (n) => parseInt(n, 10);
+  function housePoint(s, number) {
+    // номер є в даних — точно; немає — між найближчими відомими номерами цієї вулиці
+    if (s.h[number]) return { pt: s.h[number], exact: true };
+    const n = numVal(number);
+    const known = Object.entries(s.h).map(([k, v]) => [numVal(k), v]).filter(([k]) => !isNaN(k)).sort((a, b) => a[0] - b[0]);
+    const lo = [...known].reverse().find(([k]) => k <= n), hi = known.find(([k]) => k >= n);
+    if (lo && hi && hi[0] !== lo[0]) {
+      const t = (n - lo[0]) / (hi[0] - lo[0]);
+      return { pt: [lo[1][0] + (hi[1][0] - lo[1][0]) * t, lo[1][1] + (hi[1][1] - lo[1][1]) * t], exact: false };
+    }
+    if (lo || hi) return { pt: (lo || hi)[1], exact: false };
+    return { pt: streetMiddle(s), exact: false };
+  }
+  const sortedNumbers = (s) => Object.keys(s.h).sort((a, b) => numVal(a) - numVal(b) || a.localeCompare(b, "uk"));
+
+  function renderStreets(box, q, side) {
+    const { street, number } = splitQuery(q);
+    const found = matchStreets(street);
+    if (!found.length) return 0;
+    box.appendChild(group("Вулиці"));
+    if (number) {
+      found.slice(0, 4).forEach((s) => {
+        const hp = housePoint(s, number);
+        box.appendChild(item("🏠", `${s.n}, ${number}`, hp.exact ? "" : "приблизне місце на вулиці",
+          () => choose(side, { name: `${s.n}, ${number}`, lat: hp.pt[0], lon: hp.pt[1] })));
+      });
+      // інші відомі номери, що починаються так само («5» → 50, 52, 54…)
+      const s0 = found[0];
+      sortedNumbers(s0).filter((k) => k !== number && k.startsWith(number)).slice(0, 8).forEach((k) =>
+        box.appendChild(item("🏠", `${s0.n}, ${k}`, "", () => choose(side, { name: `${s0.n}, ${k}`, lat: s0.h[k][0], lon: s0.h[k][1] }))));
+    } else {
+      found.slice(0, 8).forEach((s) => {
+        const count = Object.keys(s.h).length;
+        box.appendChild(item("🛣", s.n, "натисніть і введіть номер будинку" + (count ? ` · ${count} номерів відомо` : ""), () => {
+          $("q").value = `${s.n} `; $("q").focus(); render($("q").value);
+        }));
+      });
+      // вулицю вже обрано (лишився лише номер) — показуємо відомі номери й «без номера»
+      if (found.length === 1 || norm(street) === norm(found[0].n)) {
+        const s0 = found[0];
+        sortedNumbers(s0).slice(0, 12).forEach((k) =>
+          box.appendChild(item("🏠", `${s0.n}, ${k}`, "", () => choose(side, { name: `${s0.n}, ${k}`, lat: s0.h[k][0], lon: s0.h[k][1] }))));
+        const mid = streetMiddle(s0);
+        box.appendChild(item("➖", `${s0.n} — без номера`, "номер можна дописати потім",
+          () => choose(side, { name: s0.n, lat: mid[0], lon: mid[1], needNumber: true })));
+      }
+    }
+    return found.length;
+  }
+
   function render(q) {
     const box = $("results"); box.innerHTML = "";
     const side = activeSide;
@@ -384,11 +458,13 @@
       if (mine.length) { box.appendChild(group("Місця")); mine.forEach((p) => box.appendChild(item(p.icon, p.name, p.sub, () => choose(side, p)))); }
       return;
     }
+    const streetHits = renderStreets(box, q, side);
     const words = nq.split(" ");
     const hits = all.filter((p) => { const h = norm(`${p.name} ${p.sub || ""} ${CATEGORY[p.icon] || ""}`); return words.every((w) => h.includes(w)); });
     const num = (nq.match(/\d+/) || [])[0];
     if (num) hits.sort((a, b) => (new RegExp(`№\\s*${num}\\b`).test(b.name) ? 1 : 0) - (new RegExp(`№\\s*${num}\\b`).test(a.name) ? 1 : 0));
     if (hits.length) { box.appendChild(group("Місця")); hits.slice(0, 25).forEach((p) => box.appendChild(item(p.icon, p.name, p.sub, () => choose(side, p)))); }
+    if (streetHits) return;   // вулиці знайшли миттєво — інтернет-пошук не потрібен
     const addrGroup = group("Адреси"); addrGroup.id = "addrGroup"; box.appendChild(addrGroup);
     const wait = item("⏳", "Шукаємо адреси…", "", () => {}); wait.id = "addrWait"; box.appendChild(wait);
     clearTimeout(searchTimer);
