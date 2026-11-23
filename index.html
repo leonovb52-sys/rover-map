@@ -122,19 +122,13 @@
   const $ = (id) => document.getElementById(id);
   const esc = (x) => String(x).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const map = L.map("map", { zoomControl: false }).setView(CITY, 14);
-  // сучасна векторна карта OpenFreeMap (безкоштовно, без ключів); якщо браузер не тягне WebGL — звичайна OSM
+  // власні стилі Rover (день/ніч) на даних OpenFreeMap; тема — як у Telegram (світла/темна)
+  const isDark = () => (IN_TG ? tg.colorScheme === "dark" : window.matchMedia("(prefers-color-scheme: dark)").matches);
+  const styleUrl = () => new URL(isDark() ? "rover-night.json" : "rover-day.json", location.href).href;
   try {
-    const gl = L.maplibreGL({ style: "https://tiles.openfreemap.org/styles/liberty",
+    const gl = L.maplibreGL({ style: styleUrl(),
                               attribution: '<a href="https://openfreemap.org">OpenFreeMap</a> © OpenStreetMap' }).addTo(map);
-    // підписи українською (у стилі за замовчуванням — англійською)
-    const glMap = gl.getMaplibreMap();
-    glMap.on("styledata", () => {
-      glMap.getStyle().layers.forEach((l) => {
-        if (l.type === "symbol" && l.layout && l.layout["text-field"] && !l.id.startsWith("highway-shield")) {
-          glMap.setLayoutProperty(l.id, "text-field", ["coalesce", ["get", "name:uk"], ["get", "name"]]);
-        }
-      });
-    });
+    if (IN_TG) tg.onEvent("themeChanged", () => gl.getMaplibreMap().setStyle(styleUrl()));
   } catch (e) {
     L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(map);
   }
