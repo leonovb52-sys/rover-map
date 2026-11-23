@@ -3,18 +3,18 @@ python3 make_rover_styles.py liberty.json <тека_виводу>  →  rover-da
 import copy, json, sys
 
 PALETTES = {
-    "day": {
+    "day": {  # фірмова Rover: помаранчеві головні вулиці (обрано 24.11)
         "fill": {"background": "#f2f3f5", "landuse_residential": "#eceef1", "park": "#d5ecd1", "landcover_wood": "#d7ecd2",
                  "landcover_grass": "#dcefd7", "landuse_pitch": "#d5ebd0", "landuse_track": "#dde8d9",
                  "landuse_cemetery": "#e0e8da", "landuse_hospital": "#f8e6e6", "landuse_school": "#f1efe4",
                  "water": "#a8d4f6", "landcover_sand": "#f4efdc", "aeroway_fill": "#e8e9ec", "building": "#dfe2e7"},
         "building_outline": "#cdd1d8",
         "line": {"waterway": "#a8d4f6", "park_outline": "rgba(0,0,0,0)",
-                 "motorway_link_casing": "#e8b24a", "motorway_casing": "#e8b24a", "trunk_primary_casing": "#efc65e",
-                 "link_casing": "#efc65e", "secondary_tertiary_casing": "#ecc96a", "minor_casing": "#d9dde3",
+                 "motorway_link_casing": "#e0861a", "motorway_casing": "#e0861a", "trunk_primary_casing": "#f5a623",
+                 "link_casing": "#f5a623", "secondary_tertiary_casing": "#f5b25a", "minor_casing": "#d9dde3",
                  "street_casing": "#d9dde3", "service_track_casing": "#e1e4e9", "path_pedestrian_casing": "#e1e4e9",
-                 "motorway_link": "#ffd36e", "motorway": "#ffd36e", "trunk_primary": "#ffe7a3", "link": "#ffe7a3",
-                 "secondary_tertiary": "#fff1bd", "minor": "#ffffff", "street": "#ffffff", "service_track": "#ffffff",
+                 "motorway_link": "#ffb85c", "motorway": "#ffb85c", "trunk_primary": "#ffcf8f", "link": "#ffcf8f",
+                 "secondary_tertiary": "#ffe2bd", "minor": "#ffffff", "street": "#ffffff", "service_track": "#ffffff",
                  "path_pedestrian": "#ffffff", "rail": "#c4c8d0", "aeroway": "#e8e9ec", "boundary": "#c4c8d0"},
         "text": {"label_": ("#22262d", "#ffffff"), "highway-name": ("#5b6270", "#ffffff"),
                  "poi_": ("#59606c", "#ffffff"), "water": ("#4a7db0", "rgba(255,255,255,0.85)"),
