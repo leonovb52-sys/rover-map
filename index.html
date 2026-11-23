@@ -165,18 +165,19 @@
     return best;
   }
   function estimate(from, to) {
-    const fz = locate(from), tz = locate(to);
+    // та сама формула, що й у боті: за кілометрами дорогою (пряма × коефіцієнт)
     const night = cfg.n || 1;
-    if (fz === null || tz === null) return null;
-    if (fz === "OUT" || tz === "OUT") {
-      const dist = Math.ceil(km(from, to) * (cfg.f || 1.3));
+    const dist = Math.max(1, Math.ceil(km(from, to) * (cfg.f || 1.3)));
+    const r = cfg.r || 4;
+    if (km(from, CITY) > r || km(to, CITY) > r) {
       const o = cfg.o || [200, 15];
       return { price: round(round(o[0] + dist * o[1]) * night), label: `за місто, ≈ ${dist} км` };
     }
-    const a = Math.min(centers[fz][2], centers[tz][2]), b = Math.max(centers[fz][2], centers[tz][2]);
-    const base = (cfg.p || {})[`${a}-${b}`];
-    if (base == null) return null;
-    return { price: round(base * night), label: `${fz} → ${tz}` };
+    const cm = cfg.cm || [90, 15, 120];
+    const base = Math.max(round(cm[2]), round(cm[0] + dist * cm[1]));
+    const fz = locate(from), tz = locate(to);
+    const named = fz && tz && fz !== "OUT" && tz !== "OUT";
+    return { price: round(base * night), label: named ? `${fz} → ${tz}, ≈ ${dist} км` : `по місту, ≈ ${dist} км` };
   }
 
   // ---------- замовлення ----------
