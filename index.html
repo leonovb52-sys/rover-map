@@ -60,9 +60,11 @@
     padding: 10px 14px; box-shadow: 0 2px 10px rgba(0,0,0,.15); }
   #pinbar b { display: block; padding-right: 44px; }
   #pinbar span { display: block; padding-right: 44px; }
-  #pinSearch { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); width: 38px; height: 38px;
+  #pinSearch { position: absolute; right: 8px; top: 10px; width: 38px; height: 38px;
     border: 0; border-radius: 10px; background: var(--field); font-size: 18px; }
   #pinbar span { color: var(--hint); font-size: 14px; }
+  #pinWarn { margin-top: 8px; padding: 8px 10px; border-radius: 10px; background: rgba(245,166,35,.16);
+             color: var(--text); font-size: 13px; line-height: 1.35; }
 
   /* екран пошуку */
   #search { position: fixed; inset: 0; z-index: 900; background: var(--bg); display: flex; flex-direction: column; }
@@ -86,7 +88,7 @@
 <body>
 <div id="map"></div>
 <div id="pin" class="hidden">📍</div>
-<div id="pinbar" class="hidden"><button id="pinSearch" title="Пошук адреси">🔎</button><b id="pinTitle">Вкажіть на карті</b><span id="pinAddr">Рухайте карту — мітка в центрі</span></div>
+<div id="pinbar" class="hidden"><button id="pinSearch" title="Пошук адреси">🔎</button><b id="pinTitle">Вкажіть на карті</b><span id="pinAddr">Рухайте карту — мітка в центрі</span><div id="pinWarn" class="hidden"></div></div>
 <button id="locate" title="Я тут">◎</button>
 
 <div id="sheet">
@@ -570,6 +572,11 @@
     $("pin").textContent = side === "from" ? "📍" : "🏁";
     $("pin").classList.remove("hidden"); $("pinbar").classList.remove("hidden"); $("sheet").classList.add("hidden");
     $("pinTitle").textContent = side === "from" ? "Куди під'їхати водію?" : (DELIVERY ? "Куди привезти?" : "Куди їдемо?");
+    // під час повітряних тривог GPS глушать — місце телефона може бути далеко від справжнього
+    const warn = side === "from" || DELIVERY;
+    $("pinWarn").classList.toggle("hidden", !warn);
+    if (warn) $("pinWarn").textContent = "⚠️ Через повітряні тривоги геолокація може показувати неправильно. Обов'язково " +
+      `переконайтесь, що 📍 стоїть точно там, ${side === "from" ? "де вас забрати" : "куди привезти"}.`;
     setBack(() => endPin(false));
     setButton("Готово", () => endPin(true));
     reverse(center());
