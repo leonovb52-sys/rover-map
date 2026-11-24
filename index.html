@@ -374,6 +374,8 @@
       c: note.slice(0, 200),
       ta: state.to.name.slice(0, 200),
       km: route ? route.km : undefined,   // справжні км по дорогах — бот рахує ціну за ними
+      acc: state.from.auto && pickupAcc !== null ? Math.round(pickupAcc) : undefined,
+      gps: IN_TG && tg.LocationManager ? (tg.LocationManager.isAccessGranted ? 1 : 0) : undefined,
     });
     if (IN_TG) tg.sendData(data);   // Telegram закриває карту й передає дані боту
     else alert("Відкрийте карту з бота в Telegram.\n\n" + data);
@@ -640,44 +642,70 @@
   });
 
   // ---------- моє місцезнаходження ----------
+  // GPS через Telegram (LocationManager, Bot API 8.0+) — точніший за браузерну геолокацію у вікні Telegram,
+  // яка часто дає лише місце за мережею (похибка в сотні метрів)
+  function tgLocate(cb) {
+    const lm = IN_TG && tg.isVersionAtLeast && tg.isVersionAtLeast("8.0") && tg.LocationManager;
+    if (!lm) return false;
+    const get = () => {
+      if (!lm.isLocationAvailable) return;
+      lm.getLocation((loc) => { if (loc) cb(loc.latitude, loc.longitude, loc.horizontal_accuracy || 50); });
+    };
+    if (lm.isInited) get(); else lm.init(get);
+    return true;
+  }
+
+  let pickupAcc = null;  // похибка GPS точки посадки, м — бот пише в журнал для діагностики
   function locateMe(explicit) {
-    if (!navigator.geolocation) return;
-    // телефон спершу дає грубе місце (Wi-Fi/вишки, похибка 100–500 м), точний GPS приходить за кілька секунд —
-    // слухаємо до 15 с і щоразу беремо точніше; ручну зміну «звідки» клієнтом не перезаписуємо
-    let best = null, watch = null, placed = false;
+    // телефон спершу дає грубе місце (Wi-Fi/вишки), точний GPS приходить за кілька секунд —
+    // слухаємо до 15 с обидва джерела і щоразу беремо точніше; ручну зміну «звідки» клієнтом не перезаписуємо
+    let best = null, watch = null, placed = false, failed = false;
     const stop = () => { if (watch !== null) navigator.geolocation.clearWatch(watch); watch = null; };
-    watch = navigator.geolocation.watchPosition(async (pos) => {
-      const acc = pos.coords.accuracy || 9999;
-      if (best && acc >= best) return;
+    const consider = async (lat, lon, acc) => {
+      if (best !== null && acc >= best) return;
       best = acc;
       if (acc <= 20) stop();
-      const here = [pos.coords.latitude, pos.coords.longitude];
+      const here = [lat, lon];
       if (!explicit && km(here, CITY) > 40) return stop();   // відкрили з іншого міста — лишаємо Новоукраїнку
       if (placed && !(state.from && state.from.auto)) return stop();
-      const r = await reverseAddr(here[0], here[1]);
-      const p = { lat: here[0], lon: here[1], name: r.name || "Моє місцезнаходження", here: true,
-                  needNumber: !r.number, auto: true };
+      const r = await reverseAddr(lat, lon);
+      if (acc > best) return;                                 // поки шукали адресу, прийшло точніше
+      const p = { lat, lon, name: r.name || "Моє місцезнаходження", here: true, needNumber: !r.number, auto: true };
       if (!placed) {
         if (!explicit && state.from) return stop();
         placed = true;
+        pickupAcc = acc;
         choose("from", p);
       } else if (state.from && state.from.auto) {
         // уточнення: лише пересуваємо «звідки», мітку «куди», яку клієнт зараз ставить, не чіпаємо
-        state.from = { lat: p.lat, lon: p.lon, name: p.name, needNumber: p.needNumber, auto: true };
+        state.from = { lat, lon, name: p.name, needNumber: p.needNumber, auto: true };
+        pickupAcc = acc;
         redraw();
       }
-    }, () => {
-      if (best) return;
-      stop();
+    };
+    const fail = () => {
+      if (best !== null || failed) return;
+      failed = true;
       if (explicit && IN_TG) tg.showAlert("Не вдалося визначити місце. Дозвольте геолокацію або вкажіть на карті.");
       if (!explicit && !state.from && !pinSide) startPin("from");
-    },
-    { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 });
-    setTimeout(stop, 15000);
+    };
+    const viaTg = tgLocate(consider);
+    if (navigator.geolocation) {
+      watch = navigator.geolocation.watchPosition(
+        (pos) => consider(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy || 9999),
+        // разові помилки («тимчасово недоступно») — слухаємо далі; зупиняємось, лише якщо доступ заборонено
+        (e) => { if (e.code === 1) { stop(); if (!viaTg) fail(); } },
+        { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 });
+      setTimeout(stop, 15000);
+    } else if (!viaTg) fail();
+    setTimeout(fail, 15000);
   }
   $("locate").onclick = () => {
-    if (pinSide) navigator.geolocation && navigator.geolocation.getCurrentPosition((p) => map.setView([p.coords.latitude, p.coords.longitude], 17),
-                                                                              () => {}, { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 });
+    if (pinSide) {
+      const go = (lat, lon) => map.setView([lat, lon], 17);
+      if (!tgLocate(go) && navigator.geolocation) navigator.geolocation.getCurrentPosition(
+        (p) => go(p.coords.latitude, p.coords.longitude), () => {}, { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 });
+    }
     else locateMe(true);
   };
 
