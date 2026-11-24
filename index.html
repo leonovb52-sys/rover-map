@@ -293,7 +293,7 @@
       map.fitBounds(routeLine.getBounds(), { paddingTopLeft: [40, 40], paddingBottomRight: [40, 330] });
       if (!keepRoute) fetchRoute(state.from, state.to);
       const est = estimate([state.from.lat, state.from.lon], [state.to.lat, state.to.lon]);
-      $("price").innerHTML = `≈ ${est.price} грн <small>${esc(est.label)}${cfg.n > 1 ? " · нічний тариф" : ""} · водії запропонують свої ціни</small>`;
+      $("price").innerHTML = `≈ ${est.price} грн <small>${esc(est.label)}${cfg.n > 1 ? " · " + esc(cfg.nl || "нічний тариф") : ""} · водії запропонують свої ціни</small>`;
       $("summary").classList.remove("hidden");
       setButton(`✅ Замовити · ≈ ${est.price} грн`, finish);
     } else {
@@ -320,7 +320,7 @@
       price = Math.min(round(dl[1]), Math.max(round(dl[0]), Math.max(round(cm[2]), round(cm[0] + dist * cm[1]))));
     }
     price = round(price * night);
-    $("price").innerHTML = `≈ ${price} грн <small>доставка${night > 1 ? " · нічний тариф" : ""} · водій зателефонує й уточнить деталі</small>`;
+    $("price").innerHTML = `≈ ${price} грн <small>доставка${night > 1 ? " · " + esc(cfg.nl || "нічний тариф") : ""} · водій зателефонує й уточнить деталі</small>`;
     $("what").classList.remove("hidden"); $("note").classList.add("hidden");
     $("summary").classList.remove("hidden");
     setButton(`✅ Замовити доставку · ≈ ${price} грн`, finishDelivery);
