@@ -50,8 +50,6 @@
   #summary { margin-top: 4px; }
   #price { font-size: 18px; font-weight: 700; }
   #price small { display: block; font-weight: 400; font-size: 13px; color: var(--hint); }
-  #house { width: 100%; margin: -2px 0 8px; padding: 10px 12px; border-radius: 12px; border: 2px solid var(--accent);
-    background: var(--field); color: var(--text); font-size: 15px; }
   #note { width: 100%; margin-top: 8px; padding: 11px 12px; border-radius: 12px; border: 0; background: var(--field);
     color: var(--text); font-size: 15px; }
   #fallback { display: none; width: 100%; margin-top: 10px; padding: 13px; border: 0; border-radius: 12px;
@@ -92,12 +90,11 @@
 <div id="sheet">
   <div class="grab"></div>
   <div class="field" id="fFrom"><span class="ic">🟢</span><span class="tx ph" id="tFrom">Звідки?</span></div>
-  <input id="house" class="hidden" inputmode="text" maxlength="12" placeholder="🏠 № будинку — щоб водій знайшов швидше">
   <div class="field" id="fTo"><span class="ic">🏁</span><span class="tx ph" id="tTo">Куди їдемо?</span></div>
   <div class="chips" id="chips"></div>
   <div id="summary" class="hidden">
     <div id="price"></div>
-    <input id="note" placeholder="Під'їзд, орієнтир, коментар водію (необов'язково)" maxlength="120">
+    <input id="note" placeholder="💬 Коментар водію: під'їзд, будинок, багаж… (не обов'язково)" maxlength="200">
   </div>
   <button id="fallback"></button>
 </div>
@@ -279,8 +276,8 @@
     });
     setField("from"); setField("to");
     $("fTo").classList.toggle("next", !!state.from && !state.to);
-    // номер будинку не визначився — просимо дописати (як в Uklon)
-    $("house").classList.toggle("hidden", !(state.from && state.from.needNumber));
+    // коли маршрут готовий — лише ціна, коментар і «Замовити» (швидкі кнопки ховаємо)
+    $("chips").classList.toggle("hidden", !!(state.from && state.to));
     if (state.from && state.to) {
       routeLine = route
         ? L.polyline(route.line, { color: "#f5a623", weight: 6, opacity: .95 }).addTo(map)
@@ -291,7 +288,7 @@
       const est = estimate([state.from.lat, state.from.lon], [state.to.lat, state.to.lon]);
       $("price").innerHTML = `≈ ${est.price} грн <small>${esc(est.label)}${cfg.n > 1 ? " · нічний тариф" : ""} · водії запропонують свої ціни</small>`;
       $("summary").classList.remove("hidden");
-      setButton(`Далі · ≈ ${est.price} грн`, finish);
+      setButton(`✅ Замовити · ≈ ${est.price} грн`, finish);
     } else {
       $("summary").classList.add("hidden");
       hideButton();
@@ -305,7 +302,7 @@
   function choose(side, p) {
     // для водія назва місця разом з адресою: «Нова Пошта Відділення №2 (вул. Соборна, 83)»
     state[side] = { lat: +p.lat, lon: +p.lon, name: p.sub ? `${p.name} (${p.sub})` : p.name, needNumber: !!p.needNumber };
-    if (side === "from") $("house").value = "";
+
     remember(p);
     closeSearch();
     redraw();
@@ -327,13 +324,13 @@
     return { price: round(Math.max(round(cm[2]), round(cm[0] + dist * cm[1])) * night), label: trip };
   }
 
-  const house = () => $("house").value.trim();
   function finish() {
     const note = $("note").value.trim();
     const data = JSON.stringify({
       t: "order",
       from: [state.from.lat, state.from.lon], to: [state.to.lat, state.to.lon],
-      fa: [state.from.name + (house() ? `, ${house()}` : ""), note].filter(Boolean).join(", ").slice(0, 200),
+      fa: state.from.name.slice(0, 200),
+      c: note.slice(0, 200),
       ta: state.to.name.slice(0, 200),
       km: route ? route.km : undefined,   // справжні км по дорогах — бот рахує ціну за ними
     });
