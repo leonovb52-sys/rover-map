@@ -679,7 +679,12 @@
     tg.ready(); tg.expand();
     if (tg.MainButton) tg.MainButton.setParams({ color: "#f5a623", text_color: "#111111" });
   }
-  if (DELIVERY) {
+  // доставка працює лише в свої години (за годинником телефону; сервер теж перевіряє)
+  const dh = cfg.dh || [8, 24], hour = new Date().getHours();
+  if (DELIVERY && !(dh[0] <= hour && hour < dh[1])) {
+    const msg = `Доставка працює з ${String(dh[0] % 24).padStart(2, "0")}:00 до ${String(dh[1] % 24).padStart(2, "0")}:00. Зараз можна замовити таксі 🚕`;
+    if (IN_TG) tg.showAlert(msg, () => tg.close()); else alert(msg);
+  } else if (DELIVERY) {
     chips(); redraw(); startPin("to");
     $("pinTitle").textContent = "Куди привезти?";
     // зазвичай везуть додому — ставимо мітку там, де клієнт зараз
