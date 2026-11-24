@@ -374,7 +374,7 @@
       c: note.slice(0, 200),
       ta: state.to.name.slice(0, 200),
       km: route ? route.km : undefined,   // справжні км по дорогах — бот рахує ціну за ними
-      acc: state.from.auto && pickupAcc !== null ? Math.round(pickupAcc) : undefined,
+      acc: pickupAcc !== null ? Math.round(pickupAcc) : undefined,
       gps: IN_TG && tg.LocationManager ? (tg.LocationManager.isAccessGranted ? 1 : 0) : undefined,
     });
     if (IN_TG) tg.sendData(data);   // Telegram закриває карту й передає дані боту
@@ -569,7 +569,7 @@
     if (p) map.setView([p.lat, p.lon], 17); else if (state.from) map.setView([state.from.lat, state.from.lon], 16);
     $("pin").textContent = side === "from" ? "📍" : "🏁";
     $("pin").classList.remove("hidden"); $("pinbar").classList.remove("hidden"); $("sheet").classList.add("hidden");
-    $("pinTitle").textContent = side === "from" ? "Звідки вас забрати?" : (DELIVERY ? "Куди привезти?" : "Куди їдемо?");
+    $("pinTitle").textContent = side === "from" ? "Куди під'їхати водію?" : (DELIVERY ? "Куди привезти?" : "Куди їдемо?");
     setBack(() => endPin(false));
     setButton("Готово", () => endPin(true));
     reverse(center());
@@ -653,6 +653,30 @@
     };
     if (lm.isInited) get(); else lm.init(get);
     return true;
+  }
+
+  // посадку клієнт ставить сам: карта відкривається на його місці (GPS Telegram / телефона, найточніше за 15 с),
+  // він підсуває 📍 туди, куди має під'їхати водій, і тисне «Готово». Щойно сам зрушив карту — більше не центруємо
+  function centerOnMe() {
+    let best = null, watch = null, moved = false;
+    map.once("dragstart", () => { moved = true; });
+    const stop = () => { if (watch !== null) navigator.geolocation.clearWatch(watch); watch = null; };
+    const consider = (lat, lon, acc) => {
+      if (moved || pinSide !== "from") return stop();
+      if (best !== null && acc >= best) return;
+      if (km([lat, lon], CITY) > 40) return stop();   // відкрили з іншого міста — лишаємо Новоукраїнку
+      best = acc;
+      pickupAcc = acc;
+      map.setView([lat, lon], 17);
+      if (acc <= 20) stop();
+    };
+    tgLocate(consider);
+    if (navigator.geolocation) {
+      watch = navigator.geolocation.watchPosition(
+        (pos) => consider(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy || 9999),
+        (e) => { if (e.code === 1) stop(); }, { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 });
+      setTimeout(stop, 15000);
+    }
   }
 
   let pickupAcc = null;  // похибка GPS точки посадки, м — бот пише в журнал для діагностики
@@ -743,9 +767,7 @@
       (pos) => { if (pinSide) map.setView([pos.coords.latitude, pos.coords.longitude], 17); }, () => {},
       { enableHighAccuracy: true, maximumAge: 0, timeout: 8000 });
   } else {
-    chips(); redraw(); locateMe(false);
-    // телефон довго шукає місце (або не відповідає) — не чекаємо, просимо поставити «звідки» на карті
-    setTimeout(() => { if (!state.from && !pinSide && $("search").classList.contains("hidden")) startPin("from"); }, 5000);
+    chips(); redraw(); startPin("from"); centerOnMe();
   }
   window.addEventListener("resize", placeLocate);
 })();
