@@ -655,6 +655,30 @@
     return true;
   }
 
+  // синя точка «Ви тут» з кругом похибки — щоб клієнт зорієнтувався, куди ставити 📍 для водія
+  let meDot = null, meCircle = null, meAcc = Infinity, meTime = 0;
+  function showMe(lat, lon, acc) {
+    // грубіше місце не перебиває точне, хіба що точне вже застаріло (людина рухається)
+    if (acc > meAcc && Date.now() - meTime < 10000) return;
+    meAcc = acc; meTime = Date.now();
+    const ll = [lat, lon], r = Math.min(acc, 1500);
+    if (!meDot) {
+      meCircle = L.circle(ll, { radius: r, color: "#2f80ed", weight: 1, fillColor: "#2f80ed", fillOpacity: .12,
+                                interactive: false }).addTo(map);
+      meDot = L.circleMarker(ll, { radius: 8, color: "#ffffff", weight: 3, fillColor: "#2f80ed", fillOpacity: 1,
+                                   interactive: false }).addTo(map);
+    } else {
+      meCircle.setLatLng(ll).setRadius(r);
+      meDot.setLatLng(ll);
+    }
+  }
+  function trackMe() {
+    tgLocate(showMe);
+    if (navigator.geolocation) navigator.geolocation.watchPosition(
+      (pos) => showMe(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy || 50),
+      () => {}, { enableHighAccuracy: true, maximumAge: 0 });
+  }
+
   // посадку клієнт ставить сам: карта відкривається на його місці (GPS Telegram / телефона, найточніше за 15 с),
   // він підсуває 📍 туди, куди має під'їхати водій, і тисне «Готово». Щойно сам зрушив карту — більше не центруємо
   function centerOnMe() {
@@ -760,14 +784,14 @@
     const msg = `Доставка працює з ${String(dh[0] % 24).padStart(2, "0")}:00 до ${String(dh[1] % 24).padStart(2, "0")}:00. Зараз можна замовити таксі 🚕`;
     if (IN_TG) tg.showAlert(msg, () => tg.close()); else alert(msg);
   } else if (DELIVERY) {
-    chips(); redraw(); startPin("to");
+    chips(); redraw(); startPin("to"); trackMe();
     $("pinTitle").textContent = "Куди привезти?";
     // зазвичай везуть додому — ставимо мітку там, де клієнт зараз
     if (navigator.geolocation) navigator.geolocation.getCurrentPosition(
       (pos) => { if (pinSide) map.setView([pos.coords.latitude, pos.coords.longitude], 17); }, () => {},
       { enableHighAccuracy: true, maximumAge: 0, timeout: 8000 });
   } else {
-    chips(); redraw(); startPin("from"); centerOnMe();
+    chips(); redraw(); startPin("from"); centerOnMe(); trackMe();
   }
   window.addEventListener("resize", placeLocate);
 })();
