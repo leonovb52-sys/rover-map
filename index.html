@@ -50,6 +50,8 @@
   #summary { margin-top: 4px; }
   #price { font-size: 18px; font-weight: 700; }
   #price small { display: block; font-weight: 400; font-size: 13px; color: var(--hint); }
+  #what { width: 100%; margin-top: 8px; padding: 11px 12px; border-radius: 12px; border: 2px solid var(--accent);
+    background: var(--field); color: var(--text); font: inherit; resize: none; }
   #note { width: 100%; margin-top: 8px; padding: 11px 12px; border-radius: 12px; border: 0; background: var(--field);
     color: var(--text); font-size: 15px; }
   #fallback { display: none; width: 100%; margin-top: 10px; padding: 13px; border: 0; border-radius: 12px;
@@ -94,6 +96,7 @@
   <div class="chips" id="chips"></div>
   <div id="summary" class="hidden">
     <div id="price"></div>
+    <textarea id="what" class="hidden" rows="2" maxlength="300" placeholder="📦 Що привезти? Напр.: хліб і молоко, ліки з аптеки, піца з кафе"></textarea>
     <input id="note" placeholder="💬 Коментар водію: під'їзд, будинок, багаж… (не обов'язково)" maxlength="200">
   </div>
   <button id="fallback"></button>
@@ -117,6 +120,8 @@
   } catch (e) { cfg = {}; }
 
   const CITY = cfg.h || [48.3175, 31.5300];
+  // доставка: лише одна мітка «куди привезти» + що привезти; посадки немає
+  const DELIVERY = cfg.m === "delivery";
   const CITY_NAME = "Новоукраїнка";
   const centers = {};
   (cfg.c || []).forEach(([name, zone, lat, lon]) => { centers[name] = [lat, lon, zone]; });
@@ -275,7 +280,9 @@
       if (p) markers.push(L.marker([p.lat, p.lon], { icon: L.divIcon({ html: `<div style="font-size:24px">${icon}</div>`, className: "", iconSize: [24, 24] }) }).addTo(map));
     });
     setField("from"); setField("to");
-    $("fTo").classList.toggle("next", !!state.from && !state.to);
+    $("fFrom").classList.toggle("hidden", DELIVERY);
+    $("fTo").classList.toggle("next", !DELIVERY && !!state.from && !state.to);
+    if (DELIVERY) { redrawDelivery(keepRoute); placeLocate(); return; }
     // коли маршрут готовий — лише ціна, коментар і «Замовити» (швидкі кнопки ховаємо)
     $("chips").classList.toggle("hidden", !!(state.from && state.to));
     if (state.from && state.to) {
@@ -297,6 +304,39 @@
     }
     placeLocate();
   }
+  function redrawDelivery(keepRoute) {
+    $("chips").classList.add("hidden");
+    $("tTo").textContent = state.to ? state.to.name : "Куди привезти?";
+    if (!state.to) { $("summary").classList.add("hidden"); hideButton(); return; }
+    map.setView([state.to.lat, state.to.lon], 16);
+    if (!keepRoute) fetchRoute({ lat: CITY[0], lon: CITY[1] }, state.to);   // км від центру — для ціни
+    const dist = route ? route.km : Math.max(1, Math.ceil(km(CITY, [state.to.lat, state.to.lon]) * (cfg.f || 1.3)));
+    const night = cfg.n || 1;
+    let price;
+    if (km([state.to.lat, state.to.lon], CITY) > (cfg.r || 4)) {
+      const o = cfg.o || [150, 31.2]; price = round(o[0] + dist * o[1]);
+    } else {
+      const cm = cfg.cm || [130, 13, 150], dl = cfg.dl || [150, 200];
+      price = Math.min(round(dl[1]), Math.max(round(dl[0]), Math.max(round(cm[2]), round(cm[0] + dist * cm[1]))));
+    }
+    price = round(price * night);
+    $("price").innerHTML = `≈ ${price} грн <small>доставка${night > 1 ? " · нічний тариф" : ""} · водій зателефонує й уточнить деталі</small>`;
+    $("what").classList.remove("hidden"); $("note").classList.add("hidden");
+    $("summary").classList.remove("hidden");
+    setButton(`✅ Замовити доставку · ≈ ${price} грн`, finishDelivery);
+  }
+  function finishDelivery() {
+    const what = $("what").value.trim();
+    if (!what) {
+      $("what").focus();
+      if (IN_TG) tg.showAlert("Напишіть, що потрібно привезти 🙂"); else alert("Напишіть, що потрібно привезти");
+      return;
+    }
+    const data = JSON.stringify({ t: "delivery", to: [state.to.lat, state.to.lon], ta: state.to.name.slice(0, 200),
+                                  what: what.slice(0, 300), km: route ? route.km : undefined });
+    if (IN_TG) tg.sendData(data); else alert("Відкрийте карту з бота в Telegram.\n\n" + data);
+  }
+
   function placeLocate() { $("locate").style.bottom = ($("sheet").offsetHeight + 14) + "px"; }
 
   function choose(side, p) {
@@ -526,7 +566,7 @@
     if (p) map.setView([p.lat, p.lon], 17); else if (state.from) map.setView([state.from.lat, state.from.lon], 16);
     $("pin").textContent = side === "from" ? "📍" : "🏁";
     $("pin").classList.remove("hidden"); $("pinbar").classList.remove("hidden"); $("sheet").classList.add("hidden");
-    $("pinTitle").textContent = side === "from" ? "Звідки вас забрати?" : "Куди їдемо?";
+    $("pinTitle").textContent = side === "from" ? "Звідки вас забрати?" : (DELIVERY ? "Куди привезти?" : "Куди їдемо?");
     setBack(() => endPin(false));
     setButton("Готово", () => endPin(true));
     reverse(center());
@@ -639,9 +679,18 @@
     tg.ready(); tg.expand();
     if (tg.MainButton) tg.MainButton.setParams({ color: "#f5a623", text_color: "#111111" });
   }
-  chips(); redraw(); locateMe(false);
-  // телефон довго шукає місце (або не відповідає) — не чекаємо, просимо поставити «звідки» на карті
-  setTimeout(() => { if (!state.from && !pinSide && $("search").classList.contains("hidden")) startPin("from"); }, 5000);
+  if (DELIVERY) {
+    chips(); redraw(); startPin("to");
+    $("pinTitle").textContent = "Куди привезти?";
+    // зазвичай везуть додому — ставимо мітку там, де клієнт зараз
+    if (navigator.geolocation) navigator.geolocation.getCurrentPosition(
+      (pos) => { if (pinSide) map.setView([pos.coords.latitude, pos.coords.longitude], 17); }, () => {},
+      { enableHighAccuracy: true, timeout: 8000 });
+  } else {
+    chips(); redraw(); locateMe(false);
+    // телефон довго шукає місце (або не відповідає) — не чекаємо, просимо поставити «звідки» на карті
+    setTimeout(() => { if (!state.from && !pinSide && $("search").classList.contains("hidden")) startPin("from"); }, 5000);
+  }
   window.addEventListener("resize", placeLocate);
 })();
 </script>
